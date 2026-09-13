@@ -1,0 +1,1 @@
+gh repo create instalsRegistry --public --source="." --push --remote=origin 2>&1 || echo REPO_EXISTS
