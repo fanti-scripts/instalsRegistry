@@ -1,8 +1,10 @@
-__pycache__/
 build/
-dist/
+__pycache__/
 logs/
 *.bat
 *.spec
 *.pyc
 .env
+!dist/Registry.exe
+!dist/Injector.exe
+!Injector.spec

